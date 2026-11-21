@@ -1,0 +1,5 @@
+commande dans le shell -> le main le récupère et le garde de côté -> traduis le path en absolute path
+-> lance iterateFile et récupère un tab de fileDescriptor
+-> passe les fileDescriptor dans le `lisseur` (genre qui lisse ce qui va peut-être être print comme: les perms etc..)
+-> passe les fileDescriptor dans le `trieur` (qui retourne une struct similaire a fileDescriptor [chosenFile] avec tout en optionnel, tout ce qui n'est pas en null doit être print)
+-> passe les chosenFile dans le `printeur` (qui print les fields non nuls a la chaine [Important]: si tout les chaines sont vides, omettre le \n)
