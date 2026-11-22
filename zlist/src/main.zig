@@ -192,6 +192,51 @@ fn deinitFD(fds: []fileDescriptor, nArg: neededArg) void {
     nArg.allocator.gpa.free(fds);
 }
 
+fn isPath(path: []const u8, nArg: neededArg) struct { exist: bool, realpath: ?[]u8 } {
+    var dir = std.Io.Dir.openDirAbsolute(nArg.io, path, .{}) catch |err| switch (err) {
+        .FileNotFound => return .{ .exist = false, .realpath = null },
+    };
+
+    const buffer: [linux.PATH_MAX]u8 = undefined;
+    const size = dir.realPath(nArg.io, buffer);
+    return .{ .exist = true, .realpath = nArg.allocator.dupe(u8, buffer[0..size]) };
+}
+
+//pub fn formatFDS(fds: []fileDescriptor) void {}
+
 pub fn main(init: std.process.Init) !void {
     const NA = neededArg{ .allocator = init.gpa, .io = init.io };
+    const italloc = try init.minimal.args.iterateAllocator(init.gpa);
+    var pathVec = zlib.vector.CreateVec([]const u8).init(init.gpa);
+    var argVec = zlib.vector.CreateVec([]const u8).init(init.gpa);
+    var fdsVec = zlib.vector.CreateVec([]fileDescriptor).init(init.gpa);
+    defer italloc.deinit();
+    // pour prendre tout les args
+    _ = italloc.skip();
+    while (italloc.next()) |arg| {
+        const tmparg = std.mem.span(arg);
+        const testpath = isPath(tmparg, NA);
+        defer init.gpa.free(testpath.realpath);
+        if (testpath.exist) {
+            if (std.mem.endsWith(u8, testpath.realpath.?, "/")) {
+                _ = try pathVec.append(testpath.realpath.?[0 .. testpath.realpath.?.len - 1]);
+                continue;
+            }
+            _ = try pathVec.append(testpath.realpath.?);
+        } else if (std.mem.startsWith(u8, tmparg, "-")) {
+            _ = try argVec.append(tmparg[1..]);
+        }
+    }
+    // pour la commande seule, genre juste `zlist`
+    if (pathVec.length() == 0) {
+        var actualdir = std.Io.Dir.cwd();
+        defer actualdir.close(init.io);
+        const buff: [linux.PATH_MAX]u8 = undefined;
+        const size = actualdir.realPath(init.io, buff);
+        _ = try pathVec.append(buff[0..size]);
+    }
+    //
+    for (pathVec.items) |path| {
+        _ = try fdsVec.append(iterateFile(path, NA));
+    }
 }
