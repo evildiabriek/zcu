@@ -277,10 +277,10 @@ pub fn choseFD(fd: *const fileDescriptor, nArg: neededArg, flags: []flagEnum) ch
     for (0..flags.len) |i| {
         if (@TypeOf(flags[i]) != flagEnum) continue;
         switch (flags[i]) {
-            flagEnum.DisplayDate => cf.date.? = fd.date,
-            flagEnum.DisplayOwner => cf.owner.? = fd.owner,
-            flagEnum.DisplayPermission => cf.permission.? = fd.permission,
-            flagEnum.DisplaySize => cf.size.? = fd.size,
+            flagEnum.DisplayDate => cf.date = fd.date,
+            flagEnum.DisplayOwner => cf.owner = fd.owner,
+            flagEnum.DisplayPermission => cf.permission = fd.permission,
+            flagEnum.DisplaySize => cf.size = fd.size,
             flagEnum.__HiddenEnum_AllocatedTuple => b = true,
             else => continue,
         }
@@ -393,7 +393,11 @@ pub fn main(init: std.process.Init) !void {
     _ = italloc.skip();
     while (italloc.next()) |arg| {
         const testpath = try isPath(arg, NA);
-        defer NA.allocator.free(testpath.realpath.?);
+        defer {
+            if (testpath.realpath) |rp| {
+                NA.allocator.free(rp);
+            }
+        }
         if (testpath.exist) {
             if (std.mem.endsWith(u8, testpath.realpath.?, "/")) {
                 _ = try pathVec.append(testpath.realpath.?[0 .. testpath.realpath.?.len - 1]);
