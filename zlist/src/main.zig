@@ -319,7 +319,7 @@ pub fn extractFlag(flgs: [][]const u8, nArg: neededArg) ![]flagEnum {
 // Aller... last function
 
 pub fn printingCF(cf: chosenFile) !void {
-    if (!lastDirPCF.compare(extractDir(cf.path))) {
+    if (!lastDirPCF.compare(extractDir(cf.path)) and !std.mem.eql(u8, extractDir(cf.path), "NO_PATH")) {
         std.debug.print("\n{s}:\n", .{extractDir(cf.path)});
         try lastDirPCF.rewriteAlloc(extractDir(cf.path));
     }
