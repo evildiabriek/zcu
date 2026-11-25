@@ -33,8 +33,8 @@
     // internet connectivity.
     .dependencies = .{
         .zlib = .{
-            .url = "git+https://github.com/evildiabriek/zlib#69e1e897719da382a3f4ff4958bb3232dc135a10",
-            .hash = "zlib-0.0.0-oos5cP-EAABQkZt73TVztyPe4qPIO_amU1hm_kyURjs2",
+            .url = "git+https://github.com/evildiabriek/zlib#41c78a419daec6afd25e8ba4b17aa8f3de556e66",
+            .hash = "zlib-0.0.0-oos5cCKGAAC7dccxBLLlaTZRF4Ek2DMurZ3VOaUg89Bw",
         },
     },
     .paths = .{

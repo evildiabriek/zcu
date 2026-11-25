@@ -1,10 +1,18 @@
 const std = @import("std");
 const zlib = @import("zlib");
 const linux = std.os.linux;
-
 // Go faire le tout premier Zcore utils (zcu): zlist (donc ls quoi)
 
-const flagEnum = enum { DisplayName, DisplayPermission, DisplaySize, DisplayOwner, DisplayDate, DisplayPath };
+// PCF: printingCF
+// bruh par PUR hasard ca a fait aussi l'acronyme
+// du Parti Communiste Français
+// Mdrrrr
+
+var lastDirPCF: zlib.string.string = undefined;
+const NO_PATH: []const u8 = "NO_PATH";
+var dotfile_allow: bool = false;
+
+const flagEnum = enum { DisplayPermission, DisplaySize, DisplayOwner, DisplayDate, DisplayPath, __HiddenEnum_AllocatedTuple };
 
 const neededArg = struct {
     allocator: std.mem.Allocator,
@@ -41,8 +49,45 @@ const fileDescriptor = struct {
     path: []const u8,
 };
 
-const monthsIndex = [_][]const u8{ "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" };
+const chosenFile = struct {
+    name: []const u8,
+    permission: ?permissionFile,
+    size: ?usize,
+    owner: ?[]const u8,
+    date: ?dateFormat,
+    path: []const u8,
+};
 
+pub fn defaultFD(nArg: neededArg) !fileDescriptor {
+    return .{
+        .name = try nArg.allocator.alloc(u8, 1),
+        .permission = .{
+            .type = '?',
+            .owner = .{
+                .read = 0,
+                .write = 0,
+                .execute = 0,
+            },
+            .group = .{
+                .read = 0,
+                .write = 0,
+                .execute = 0,
+            },
+            .others = .{
+                .read = 0,
+                .write = 0,
+                .execute = 0,
+            },
+        },
+        .date = .{ .day = 0, .hour = 0, .minute = 0, .month = "", .year = 0 },
+        .size = 0,
+        .path = try nArg.allocator.alloc(u8, 1),
+        .owner = try nArg.allocator.alloc(u8, 1),
+    };
+}
+
+const monthsIndex = [_][]const u8{ "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" };
+// Juste pour la date cette partie...
 fn isLeapYear(year: u32) bool {
     return (@rem(year, 4) == 0 and @rem(year, 100) != 0) or (@rem(year, 400) == 0);
 }
@@ -108,12 +153,14 @@ fn unixTimestampToUTC(timestamp: u64) dateFormat {
         .minute = minute,
     };
 }
+// Piou la date...
 
 pub fn resolvePath(dir: []const u8, name: []const u8, nArg: neededArg, kind: std.Io.File.Kind) ![]u8 {
     var tmp: [linux.PATH_MAX]u8 = undefined;
     const path = try nArg.allocator.print("{s}/{s}", .{ dir, name });
     if (kind == .sym_link) {
         const n = try std.Io.Dir.readLinkAbsolute(nArg.io, path, &tmp);
+        nArg.allocator.free(path);
         return nArg.allocator.dupe(u8, tmp[0..n]);
     }
     return path;
@@ -123,7 +170,7 @@ pub fn iterateFile(path: []const u8, nArg: neededArg) ![]fileDescriptor {
     var vec = zlib.vector.CreateVec(fileDescriptor).init(nArg.allocator);
     defer vec.deinit();
 
-    var dir = try std.Io.Dir.openDirAbsolute(nArg.io, path, .{ .iterate = true });
+    var dir = try std.Io.Dir.cwd().openDir(nArg.io, path, .{ .iterate = true });
     defer dir.close(nArg.io);
     var iterator = dir.iterate();
     var file: std.Io.File = undefined;
@@ -134,8 +181,13 @@ pub fn iterateFile(path: []const u8, nArg: neededArg) ![]fileDescriptor {
     var passwd: *std.c.passwd = undefined;
 
     while (try iterator.next(nArg.io)) |entry| {
-        file = try std.Io.Dir.openFile(dir, nArg.io, entry.name, .{});
+        if (entry.name[0] == '.' and !dotfile_allow) continue;
+        file = std.Io.Dir.openFile(dir, nArg.io, entry.name, .{}) catch {
+            _ = try vec.append(try defaultFD(nArg));
+            continue;
+        };
         defer file.close(nArg.io);
+        errdefer file.close(nArg.io);
         stat = try file.stat(nArg.io);
         perm = stat.permissions.toMode();
         date = unixTimestampToUTC(@intCast(@divTrunc(stat.mtime.nanoseconds, 1_000_000)));
@@ -179,64 +231,204 @@ pub fn iterateFile(path: []const u8, nArg: neededArg) ![]fileDescriptor {
         });
     }
 
-    return nArg.allocator.dupe(fileDescriptor, vec.items);
+    return vec.getAllElementsDupe();
 }
 
 fn deinitFD(fds: []fileDescriptor, nArg: neededArg) void {
     for (fds) |f| {
-        std.log.debug("Name: {s}, owner: {s}, path: {s}", .{ f.name, f.owner, f.path });
         nArg.allocator.free(f.name);
-        nArg.allocator.gpa.free(f.owner);
-        nArg.allocator.gpa.free(f.path);
+        nArg.allocator.free(f.owner);
+        nArg.allocator.free(f.path);
     }
-    nArg.allocator.gpa.free(fds);
+    //nArg.allocator.free(fds);
 }
 
-fn isPath(path: []const u8, nArg: neededArg) struct { exist: bool, realpath: ?[]u8 } {
-    var dir = std.Io.Dir.openDirAbsolute(nArg.io, path, .{}) catch |err| switch (err) {
-        .FileNotFound => return .{ .exist = false, .realpath = null },
+fn corespondByte(byte: *u8) void {
+    if (byte.* == 4) {
+        byte.* = 'r';
+    } else if (byte.* == 2) {
+        byte.* = 'w';
+    } else if (byte.* == 1) {
+        byte.* = 'x';
+    } else {
+        byte.* = '-';
+    }
+}
+
+pub fn formatFDS(fd: *fileDescriptor) void {
+    inline for (@typeInfo(@TypeOf(fd.permission)).@"struct".field_names) |perm_name| {
+        if (@TypeOf(@field(fd.permission, perm_name)) == u8) continue;
+        inline for (@typeInfo(@TypeOf(@field(fd.permission, perm_name))).@"struct".field_names) |byte_name| {
+            corespondByte(&@field(@field(fd.permission, perm_name), byte_name));
+        }
+    }
+}
+
+pub fn choseFD(fd: *const fileDescriptor, nArg: neededArg, flags: []flagEnum) chosenFile {
+    var cf: chosenFile = .{
+        .name = fd.name,
+        .date = null,
+        .owner = null,
+        .path = fd.path,
+        .permission = null,
+        .size = null,
+    };
+    var b = false;
+    for (0..flags.len) |i| {
+        if (@TypeOf(flags[i]) != flagEnum) continue;
+        switch (flags[i]) {
+            flagEnum.DisplayDate => cf.date.? = fd.date,
+            flagEnum.DisplayOwner => cf.owner.? = fd.owner,
+            flagEnum.DisplayPermission => cf.permission.? = fd.permission,
+            flagEnum.DisplaySize => cf.size.? = fd.size,
+            flagEnum.__HiddenEnum_AllocatedTuple => b = true,
+            else => continue,
+        }
+    }
+    if (b) nArg.allocator.free(flags);
+    return cf;
+}
+
+// Zlist |>
+// -d = display date
+// -o = display owner
+// -p = display path
+// -P = display permission
+// -s = display size
+// -a = dotfile allow
+
+pub fn extractFlag(flgs: [][]const u8, nArg: neededArg) ![]flagEnum {
+    var vec = zlib.vector.CreateVec(flagEnum).init(nArg.allocator);
+    defer vec.deinit();
+    _ = try vec.append(flagEnum.__HiddenEnum_AllocatedTuple);
+    for (flgs) |f| {
+        for (f) |byte| {
+            switch (byte) {
+                'd' => _ = try vec.append(flagEnum.DisplayDate),
+                'o' => _ = try vec.append(flagEnum.DisplayOwner),
+                'p' => _ = try vec.append(flagEnum.DisplayPath),
+                'P' => _ = try vec.append(flagEnum.DisplayPermission),
+                's' => _ = try vec.append(flagEnum.DisplaySize),
+                else => continue,
+            }
+        }
+    }
+    return vec.getAllElementsDupe();
+}
+
+// Aller... last function
+
+pub fn printingCF(cf: chosenFile) !void {
+    if (!lastDirPCF.compare(extractDir(cf.path))) {
+        std.debug.print("\n{s}:\n", .{extractDir(cf.path)});
+        try lastDirPCF.rewriteAlloc(extractDir(cf.path));
+    }
+
+    if (cf.permission) |perm| {
+        std.debug.print("{c}{c}{c}{c}{c}{c}{c}{c}{c}{c} ", .{
+            perm.type,
+            perm.owner.read,
+            perm.owner.write,
+            perm.owner.execute,
+            perm.group.read,
+            perm.group.write,
+            perm.group.execute,
+            perm.others.read,
+            perm.others.write,
+            perm.others.execute, // 10, wha c'est beaucoup
+        });
+    }
+    if (cf.size) |size| {
+        std.debug.print("{d} ", .{size});
+    }
+    if (cf.owner) |owner| {
+        std.debug.print("{s} ", .{owner});
+    }
+    if (cf.date) |date| {
+        std.debug.print("{d} {s} {d} at {d}:{d} ", .{
+            date.day,
+            date.month,
+            date.year,
+            date.hour,
+            date.minute,
+        });
+    }
+    std.debug.print("{s}\n", .{cf.name});
+}
+
+fn extractDir(path: []const u8) []const u8 {
+    if (std.mem.findScalarLast(u8, path, '/')) |i| {
+        return path[0..i];
+    }
+    return NO_PATH;
+}
+
+fn isPath(path: []const u8, nArg: neededArg) !struct { exist: bool, realpath: ?[]u8 } {
+    var dir = std.Io.Dir.cwd().openDir(nArg.io, path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return .{ .exist = false, .realpath = null },
+        else => unreachable,
     };
 
-    const buffer: [linux.PATH_MAX]u8 = undefined;
-    const size = dir.realPath(nArg.io, buffer);
-    return .{ .exist = true, .realpath = nArg.allocator.dupe(u8, buffer[0..size]) };
+    var buffer: [linux.PATH_MAX]u8 = undefined;
+    const size = try dir.realPath(nArg.io, &buffer);
+    return .{ .exist = true, .realpath = try nArg.allocator.dupe(u8, buffer[0..size]) };
 }
-
-//pub fn formatFDS(fds: []fileDescriptor) void {}
 
 pub fn main(init: std.process.Init) !void {
     const NA = neededArg{ .allocator = init.gpa, .io = init.io };
-    const italloc = try init.minimal.args.iterateAllocator(init.gpa);
-    var pathVec = zlib.vector.CreateVec([]const u8).init(init.gpa);
-    var argVec = zlib.vector.CreateVec([]const u8).init(init.gpa);
-    var fdsVec = zlib.vector.CreateVec([]fileDescriptor).init(init.gpa);
+    var italloc = try init.minimal.args.iterateAllocator(NA.allocator);
+    var pathVec = zlib.vector.CreateVec([]const u8).init(NA.allocator);
+    var argVec = zlib.vector.CreateVec([]const u8).init(NA.allocator);
+    var fdsVec = zlib.vector.CreateVec([]fileDescriptor).init(NA.allocator);
+    var cfsVec = zlib.vector.CreateVec(chosenFile).init(NA.allocator);
+    lastDirPCF = try .init(NA.allocator, "<NULL>");
+
+    defer lastDirPCF.deinit();
+    defer pathVec.deinit();
+    defer argVec.deinit();
+    defer fdsVec.deinit();
     defer italloc.deinit();
+    defer cfsVec.deinit();
     // pour prendre tout les args
     _ = italloc.skip();
     while (italloc.next()) |arg| {
-        const tmparg = std.mem.span(arg);
-        const testpath = isPath(tmparg, NA);
-        defer init.gpa.free(testpath.realpath);
+        const testpath = try isPath(arg, NA);
+        defer NA.allocator.free(testpath.realpath.?);
         if (testpath.exist) {
             if (std.mem.endsWith(u8, testpath.realpath.?, "/")) {
                 _ = try pathVec.append(testpath.realpath.?[0 .. testpath.realpath.?.len - 1]);
                 continue;
             }
             _ = try pathVec.append(testpath.realpath.?);
-        } else if (std.mem.startsWith(u8, tmparg, "-")) {
-            _ = try argVec.append(tmparg[1..]);
+        } else if (std.mem.startsWith(u8, arg, "-")) {
+            _ = try argVec.append(arg[1..]);
+            if (std.mem.findScalar(u8, arg, 'a') != null) dotfile_allow = true;
         }
     }
     // pour la commande seule, genre juste `zlist`
     if (pathVec.length() == 0) {
         var actualdir = std.Io.Dir.cwd();
-        defer actualdir.close(init.io);
-        const buff: [linux.PATH_MAX]u8 = undefined;
-        const size = actualdir.realPath(init.io, buff);
+        var buff: [linux.PATH_MAX]u8 = undefined;
+        const size = try actualdir.realPath(init.io, &buff);
         _ = try pathVec.append(buff[0..size]);
     }
-    //
+    // vector de tableaux, son
     for (pathVec.items) |path| {
-        _ = try fdsVec.append(iterateFile(path, NA));
+        const tmp = try iterateFile(path, NA);
+        _ = try fdsVec.appendNoAlloc(tmp);
+    }
+    for (fdsVec.items) |*fds| {
+        for (fds.*) |*fdss| {
+            formatFDS(fdss);
+            _ = try cfsVec.append(choseFD(fdss, NA, try extractFlag(argVec.items, NA)));
+        }
+    }
+
+    for (cfsVec.items) |cf| {
+        try printingCF(cf);
+    }
+
+    for (fdsVec.items) |fds| {
+        deinitFD(fds, NA);
     }
 }
