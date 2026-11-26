@@ -1,0 +1,6 @@
+commande lancée ->
+on crée un vector et déplace tout les args dans le vector ->
+On boucle jusqu'au premier dossier, et on resize le vector a cette index la ->
+On reboucle depuis le début ->
+Pour chaque file on le garde en mémoire avec son nom ->
+on le réecrie dans le dossier donné.
