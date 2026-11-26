@@ -306,8 +306,7 @@ pub fn extractFlag(flgs: [][]const u8, nArg: neededArg) ![]flagEnum {
             switch (byte) {
                 'd' => _ = try vec.append(flagEnum.DisplayDate),
                 'o' => _ = try vec.append(flagEnum.DisplayOwner),
-                'p' => _ = try vec.append(flagEnum.DisplayPath),
-                'P' => _ = try vec.append(flagEnum.DisplayPermission),
+                'p' => _ = try vec.append(flagEnum.DisplayPermission),
                 's' => _ = try vec.append(flagEnum.DisplaySize),
                 else => continue,
             }
@@ -374,6 +373,18 @@ fn isPath(path: []const u8, nArg: neededArg) !struct { exist: bool, realpath: ?[
     return .{ .exist = true, .realpath = try nArg.allocator.dupe(u8, buffer[0..size]) };
 }
 
+fn printHelp() void {
+    std.debug.print(
+        \\ Zlist |>
+        \\ -d = display date
+        \\ -o = display owner
+        \\ -p = display permission
+        \\ -s = display size
+        \\ -a = dotfile allow
+    , .{});
+    std.debug.print("\n", .{});
+}
+
 pub fn main(init: std.process.Init) !void {
     const NA = neededArg{ .allocator = init.gpa, .io = init.io };
     var italloc = try init.minimal.args.iterateAllocator(NA.allocator);
@@ -392,6 +403,10 @@ pub fn main(init: std.process.Init) !void {
     // pour prendre tout les args
     _ = italloc.skip();
     while (italloc.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--help")) {
+            printHelp();
+            std.process.exit(0);
+        }
         const testpath = try isPath(arg, NA);
         defer {
             if (testpath.realpath) |rp| {
