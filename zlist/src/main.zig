@@ -327,7 +327,10 @@ pub fn printingCF(cf: chosenFile, nArg: neededArg) !void {
     var Fperline = true;
 
     if (cf.permission) |perm| {
-        try colorp.cprint("{c}", colorp.BLUE, nArg.allocator, .{perm.type});
+        try colorp.cprint("{c}", switch (perm.type) {
+            '.' => colorp.GREY,
+            else => colorp.BLUE,
+        }, nArg.allocator, .{perm.type});
 
         try colorp.cprint("{c}", switch (perm.owner.read) {
             '-' => colorp.GREY,
@@ -379,7 +382,7 @@ pub fn printingCF(cf: chosenFile, nArg: neededArg) !void {
         Fperline = false;
     }
     if (cf.date) |date| {
-        try colorp.cprint("{d} {s} {d} at {d}:{d} ", colorp.YELLOW, nArg.allocator, .{
+        try colorp.cprint("{d} {s} {d} at {d}:{d} ", colorp.BLUE, nArg.allocator, .{
             date.day,
             date.month,
             date.year,
@@ -392,7 +395,7 @@ pub fn printingCF(cf: chosenFile, nArg: neededArg) !void {
         try colorp.cprint("{s} ", colorp.BLUE, nArg.allocator, .{cf.name});
         countPerLine += 1;
     } else {
-        try colorp.cprintn("{s}", colorp.BLUE, nArg.allocator, .{cf.name});
+        try colorp.cprintn("{s}", colorp.ORANGE, nArg.allocator, .{cf.name});
         countPerLine = 0;
     }
 }
