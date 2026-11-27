@@ -1,5 +1,6 @@
 const std = @import("std");
 const zlib = @import("zlib");
+const colorp = @import("colored_print.zig");
 const linux = std.os.linux;
 // Go faire le tout premier Zcore utils (zcu): zlist (donc ls quoi)
 
@@ -11,6 +12,7 @@ const linux = std.os.linux;
 var lastDirPCF: zlib.string.string = undefined;
 const NO_PATH: []const u8 = "NO_PATH";
 var dotfile_allow: bool = false;
+var countPerLine: i32 = 0;
 
 const flagEnum = enum { DisplayPermission, DisplaySize, DisplayOwner, DisplayDate, DisplayPath, __HiddenEnum_AllocatedTuple };
 
@@ -317,42 +319,82 @@ pub fn extractFlag(flgs: [][]const u8, nArg: neededArg) ![]flagEnum {
 
 // Aller... last function
 
-pub fn printingCF(cf: chosenFile) !void {
+pub fn printingCF(cf: chosenFile, nArg: neededArg) !void {
     if (!lastDirPCF.compare(extractDir(cf.path)) and !std.mem.eql(u8, extractDir(cf.path), "NO_PATH")) {
-        std.debug.print("\n{s}:\n", .{extractDir(cf.path)});
+        try colorp.cprintn("\n{s}:", colorp.RED, nArg.allocator, .{extractDir(cf.path)});
         try lastDirPCF.rewriteAlloc(extractDir(cf.path));
     }
+    var Fperline = true;
 
     if (cf.permission) |perm| {
-        std.debug.print("{c}{c}{c}{c}{c}{c}{c}{c}{c}{c} ", .{
-            perm.type,
-            perm.owner.read,
-            perm.owner.write,
-            perm.owner.execute,
-            perm.group.read,
-            perm.group.write,
-            perm.group.execute,
-            perm.others.read,
-            perm.others.write,
-            perm.others.execute, // 10, wha c'est beaucoup
-        });
+        try colorp.cprint("{c}", colorp.BLUE, nArg.allocator, .{perm.type});
+
+        try colorp.cprint("{c}", switch (perm.owner.read) {
+            '-' => colorp.GREY,
+            else => colorp.YELLOW,
+        }, nArg.allocator, .{perm.owner.read});
+        try colorp.cprint("{c}", switch (perm.owner.write) {
+            '-' => colorp.GREY,
+            else => colorp.RED,
+        }, nArg.allocator, .{perm.owner.write});
+        try colorp.cprint("{c}", switch (perm.owner.execute) {
+            '-' => colorp.GREY,
+            else => colorp.GREEN,
+        }, nArg.allocator, .{perm.owner.execute});
+
+        try colorp.cprint("{c}", switch (perm.group.read) {
+            '-' => colorp.GREY,
+            else => colorp.YELLOW,
+        }, nArg.allocator, .{perm.group.read});
+        try colorp.cprint("{c}", switch (perm.group.write) {
+            '-' => colorp.GREY,
+            else => colorp.RED,
+        }, nArg.allocator, .{perm.group.write});
+        try colorp.cprint("{c}", switch (perm.group.execute) {
+            '-' => colorp.GREY,
+            else => colorp.GREEN,
+        }, nArg.allocator, .{perm.group.execute});
+
+        try colorp.cprint("{c}", switch (perm.others.read) {
+            '-' => colorp.GREY,
+            else => colorp.YELLOW,
+        }, nArg.allocator, .{perm.others.read});
+        try colorp.cprint("{c}", switch (perm.others.write) {
+            '-' => colorp.GREY,
+            else => colorp.RED,
+        }, nArg.allocator, .{perm.others.write});
+        try colorp.cprint("{c}", switch (perm.others.execute) {
+            '-' => colorp.GREY,
+            else => colorp.GREEN,
+        }, nArg.allocator, .{perm.others.execute});
+
+        Fperline = false;
     }
     if (cf.size) |size| {
-        std.debug.print("{d} ", .{size});
+        try colorp.cprint("{d} ", colorp.GREEN, nArg.allocator, .{size});
+        Fperline = false;
     }
     if (cf.owner) |owner| {
-        std.debug.print("{s} ", .{owner});
+        try colorp.cprint("{s} ", colorp.YELLOW, nArg.allocator, .{owner});
+        Fperline = false;
     }
     if (cf.date) |date| {
-        std.debug.print("{d} {s} {d} at {d}:{d} ", .{
+        try colorp.cprint("{d} {s} {d} at {d}:{d} ", colorp.YELLOW, nArg.allocator, .{
             date.day,
             date.month,
             date.year,
             date.hour,
             date.minute,
         });
+        Fperline = false;
     }
-    std.debug.print("{s}\n", .{cf.name});
+    if (Fperline and countPerLine < 3) {
+        try colorp.cprint("{s} ", colorp.BLUE, nArg.allocator, .{cf.name});
+        countPerLine += 1;
+    } else {
+        try colorp.cprintn("{s}", colorp.BLUE, nArg.allocator, .{cf.name});
+        countPerLine = 0;
+    }
 }
 
 fn extractDir(path: []const u8) []const u8 {
@@ -444,8 +486,9 @@ pub fn main(init: std.process.Init) !void {
     }
 
     for (cfsVec.items) |cf| {
-        try printingCF(cf);
+        try printingCF(cf, NA);
     }
+    std.debug.print("\n", .{});
 
     for (fdsVec.items) |fds| {
         deinitFD(fds, NA);
