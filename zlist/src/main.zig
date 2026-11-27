@@ -149,7 +149,7 @@ fn unixTimestampToUTC(timestamp: u64) dateFormat {
 
     return .{
         .year = year,
-        .month = monthsIndex[month],
+        .month = monthsIndex[month - 1],
         .day = day,
         .hour = hour,
         .minute = minute,
