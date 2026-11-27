@@ -1,71 +1,77 @@
 const std = @import("std");
-const Io = std.Io;
+const zlib = @import("zlib");
 
-const zcp = @import("zcp");
+const neededArg = struct {
+    allocator: std.mem.Allocator,
+    io: std.Io,
+};
+
+const minimalFile = struct {
+    content: []const u8,
+    destpath: []const u8,
+};
+
+fn isDir(path: []const u8, nArg: neededArg) bool {
+    const dir = std.Io.Dir.cwd().openDir(nArg.io, path, .{}) catch {
+        return false;
+    };
+    dir.close(nArg.io);
+    return true;
+}
+
+fn extractName(path: []const u8) []const u8 {
+    return ret: {
+        if (std.mem.findScalarLast(u8, path, '/')) |v| {
+            break :ret path[v + 1 ..];
+        }
+        break :ret path;
+    };
+}
+
+fn deinitFile(mfs: []minimalFile, nArg: neededArg) void {
+    for (mfs) |mf| {
+        nArg.allocator.free(mf.content);
+        nArg.allocator.free(mf.destpath);
+    }
+}
 
 pub fn main(init: std.process.Init) !void {
-    // Prints to stderr, unbuffered, ignoring potential errors.
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
+    const NA = neededArg{ .allocator = init.gpa, .io = init.io };
+    var argsVec = zlib.vector.CreateVec([]const u8).init(NA.allocator);
+    var fileVec = zlib.vector.CreateVec(minimalFile).init(NA.allocator);
 
-    // This is appropriate for anything that lives as long as the process.
-    const arena: std.mem.Allocator = init.arena.allocator();
+    defer fileVec.deinit();
+    defer deinitFile(fileVec.items, NA);
+    defer argsVec.deinit();
+    var dest: zlib.string.string = try .init(NA.allocator, "<NULL_PATH>");
+    defer dest.deinit();
+    zlib.fs._init(init.io, init.gpa);
 
-    // Accessing command line arguments:
-    const args = try init.minimal.args.toSlice(arena);
-    for (args) |arg| {
-        std.log.info("arg: {s}", .{arg});
+    var itargs = init.minimal.args.iterate();
+    _ = itargs.skip();
+    while (itargs.next()) |arg| {
+        _ = try argsVec.append(arg);
     }
-
-    // In order to do I/O operations need an `Io` instance.
-    const io = init.io;
-
-    // Stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    var stdout_buffer: [1024]u8 = undefined;
-    var stdout_file_writer: Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
-    const stdout_writer = &stdout_file_writer.interface;
-
-    try zcp.printAnotherMessage(stdout_writer);
-
-    try stdout_writer.flush(); // Don't forget to flush!
-}
-
-test "simple test" {
-    const gpa = std.testing.allocator;
-    var list: std.ArrayList(i32) = .empty;
-    defer list.deinit(gpa); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(gpa, 42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
-
-test "fuzz example" {
-    try std.testing.fuzz({}, testOne, .{});
-}
-
-fn testOne(context: void, smith: *std.testing.Smith) !void {
-    _ = context;
-    // Try command `zig build test --fuzz -Doptimize=ReleaseFast` to see if it manages to fail this test case!
-
-    const gpa = std.testing.allocator;
-    var list: std.ArrayList(u8) = .empty;
-    defer list.deinit(gpa);
-    while (!smith.eos()) switch (smith.value(enum { add_data, dup_data })) {
-        .add_data => {
-            const slice = try list.addManyAsSlice(gpa, smith.value(u4));
-            smith.bytes(slice);
-        },
-        .dup_data => {
-            if (list.items.len == 0) continue;
-            if (list.items.len > std.math.maxInt(u32)) return error.SkipZigTest;
-            const len = smith.valueRangeAtMost(u32, 1, @min(32, list.items.len));
-            const off = smith.valueRangeAtMost(u32, 0, @intCast(list.items.len - len));
-            try list.appendSlice(gpa, list.items[off..][0..len]);
-            try std.testing.expectEqualSlices(
-                u8,
-                list.items[off..][0..len],
-                list.items[list.items.len - len ..],
-            );
-        },
-    };
+    const alenght = argsVec.length();
+    for (argsVec.items, 0..) |itm, idx| {
+        if (!isDir(itm, NA)) continue;
+        try dest.rewriteAlloc(try argsVec.getValue(idx));
+        try argsVec.resize(idx);
+        break;
+    }
+    if (!dest.endswith("/")) try dest.cat("/");
+    if (alenght == argsVec.length()) {
+        std.log.err("No dest found", .{});
+        std.process.exit(1);
+    }
+    for (argsVec.items) |file| {
+        _ = try fileVec.append(.{
+            .content = try zlib.fs.File.readFile(file, null),
+            .destpath = try NA.allocator.print("{s}{s}", .{ dest.get(), extractName(file) }),
+        });
+    }
+    for (fileVec.items) |file| {
+        if (!zlib.fs.File.ifExist(file.destpath)) _ = try zlib.fs.File.createFile(file.destpath, .{});
+        try zlib.fs.File.writeFile(file.destpath, file.content);
+    }
 }
