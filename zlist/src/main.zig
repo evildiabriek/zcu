@@ -363,7 +363,7 @@ pub fn printingCF(cf: chosenFile, nArg: neededArg) !void {
             '-' => colorp.GREY,
             else => colorp.RED,
         }, nArg.allocator, .{perm.others.write});
-        try colorp.cprint("{c}", switch (perm.others.execute) {
+        try colorp.cprint("{c} ", switch (perm.others.execute) {
             '-' => colorp.GREY,
             else => colorp.GREEN,
         }, nArg.allocator, .{perm.others.execute});
