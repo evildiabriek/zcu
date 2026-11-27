@@ -392,7 +392,7 @@ pub fn printingCF(cf: chosenFile, nArg: neededArg) !void {
         Fperline = false;
     }
     if (Fperline and countPerLine < 3) {
-        try colorp.cprint("{s} ", colorp.BLUE, nArg.allocator, .{cf.name});
+        try colorp.cprint("{s} ", colorp.ORANGE, nArg.allocator, .{cf.name});
         countPerLine += 1;
     } else {
         try colorp.cprintn("{s}", colorp.ORANGE, nArg.allocator, .{cf.name});
